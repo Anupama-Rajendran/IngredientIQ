@@ -1,0 +1,86 @@
+@import url("https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;800;900&family=Montserrat:wght@400;500;600;700&family=Lato:wght@400;500;700&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family:
+    "Montserrat",
+    "Lato",
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    "Helvetica Neue",
+    sans-serif;
+  background-color: #f5f1e8;
+  color: #2c2c2c;
+  line-height: 1.6;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: "Playfair Display", serif;
+  font-weight: 700;
+  color: #385247;
+}
+
+@layer components {
+  .btn-primary {
+    @apply px-6 py-2.5 bg-forest-700 text-white rounded-lg font-semibold transition-all shadow-md;
+  }
+
+  .btn-primary:hover {
+    @apply bg-forest-800 shadow-lg;
+  }
+
+  .btn-primary:disabled {
+    @apply bg-sage-300 cursor-not-allowed;
+  }
+
+  .btn-primary:active {
+    @apply scale-95;
+  }
+
+  .btn-secondary {
+    @apply px-6 py-2.5 bg-sage-100 text-sage-700 rounded-lg font-semibold transition-all border border-sage-300;
+  }
+
+  .btn-secondary:hover {
+    @apply bg-sage-200;
+  }
+
+  .card {
+    @apply bg-white rounded-xl border border-sage-200 p-8 shadow-sm;
+  }
+
+  .card-hover {
+    @apply transition-all duration-300 hover:shadow-xl hover:scale-105 hover:border-sage-400 cursor-pointer;
+  }
+
+  .input-field {
+    @apply w-full px-4 py-2.5 border border-sage-300 rounded-lg text-sm font-medium transition-all;
+  }
+
+  .input-field:focus {
+    @apply outline-none ring-2 ring-forest-700 border-forest-700;
+  }
+
+  .heading-serif {
+    @apply font-serif text-sage-900;
+  }
+}

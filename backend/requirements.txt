@@ -1,0 +1,14 @@
+fastapi
+uvicorn
+python-multipart
+requests
+chromadb
+numpy<2.0
+langchain
+langchain-openai
+openai
+anthropic
+python-dotenv
+pydantic
+fuzzywuzzy
+python-Levenshtein
