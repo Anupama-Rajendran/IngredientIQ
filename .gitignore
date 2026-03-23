@@ -12,6 +12,10 @@ eggs/
 .eggs/
 lib/
 lib64/
+
+# But DO include frontend/lib files
+!frontend/lib/
+!frontend/lib/**
 parts/
 sdist/
 var/
