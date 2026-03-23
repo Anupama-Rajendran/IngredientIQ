@@ -1,34 +1,44 @@
 """RAG pipeline for ingredient safety analysis."""
 from typing import List, Dict, Optional
 from langchain_core.prompts import PromptTemplate
+from langchain_core.messages import HumanMessage
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 
 from .knowledge_base import ChemicalKnowledgeBase
+from .data_loaders import PubChemLoader, FDAGRASLoader, EWGLoader, IARCLoader
 import json
+import requests
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class IngredientSafetyRAG:
     """RAG pipeline for analyzing ingredient safety with citations."""
     
-    def __init__(self, kb: ChemicalKnowledgeBase, llm=None):
+    def __init__(self, kb: ChemicalKnowledgeBase, llm=None, mcp_server=None):
         """Initialize the RAG pipeline.
         
         Args:
             kb: ChemicalKnowledgeBase instance
             llm: Language model to use (if None, uses Claude via Anthropic)
+            mcp_server: Optional MCP server for tool access
         """
         self.kb = kb
         self.llm = llm
+        self.mcp_server = mcp_server
+        
+        # Initialize loaders for multi-source lookup
+        self.fda_loader = FDAGRASLoader()
+        self.ewg_loader = EWGLoader()
+        self.iarc_loader = IARCLoader()
         
         self.safety_prompt_template = """You are a chemical safety expert analyzing ingredients in consumer products.
-Your task is to classify the ingredient's safety based ONLY on the provided chemical safety database.
 
-CRITICAL INSTRUCTIONS:
-- Do NOT use any general knowledge about chemicals
-- Do NOT infer or assume safety levels
-- If the ingredient is not in the database, respond with UNKNOWN
-- Only cite information explicitly present in the database
-- Be conservative: when uncertain, rate CAUTION or HARMFUL
+Based on the chemical safety database information provided below, classify the ingredient and provide reasoning.
+The database may include data from multiple sources:
+- Local knowledge base (compiled from PubChem, FDA GRAS, EWG, IARC)
+- Real-time PubChem API queries (marked as "Live data from PubChem")
 
 CHEMICAL SAFETY DATABASE:
 {context}
@@ -37,27 +47,165 @@ INGREDIENT TO ANALYZE: {question}
 
 Provide your response in the following JSON format:
 {{
-    "ingredient_name": "string - exact normalized ingredient name from database or question",
+    "ingredient_name": "string - normalized ingredient name",
     "safety_rating": "SAFE|CAUTION|HARMFUL|UNKNOWN",
-    "reasoning": "string - detailed explanation citing ONLY database sources",
-    "hazards": ["list of hazards explicitly mentioned in database"],
-    "sources": ["list of exact source citations from database"],
+    "reasoning": "string - detailed explanation of the classification",
+    "hazards": ["list of identified hazards"],
+    "sources": ["list of evidence sources"],
     "confidence_score": 0.0-1.0
 }}
 
-VALIDATION RULES:
-1. Only return valid JSON, no markdown or additional text
-2. Every claim must be traceable to database content
-3. If database is silent on safety, say UNKNOWN
-4. List only hazards explicitly mentioned in retrieved data
-5. Cite exact source names/references from database
-6. confidence_score reflects how well database answers the question (not general knowledge)
-7. When in doubt between ratings, choose the more conservative (e.g., CAUTION over SAFE)"""
+Rules:
+1. Only return valid JSON, no additional text
+2. Base your classification on the database information provided
+3. If database shows conflicting information, weight by source authority
+4. If database includes live PubChem data, use it to provide a proper safety classification (never say the database lacks data if live data is provided)
+5. If no relevant information found, return UNKNOWN only if both KB and live API searches failed
+6. Always cite the sources used in classification
+7. Be conservative - when in doubt, err toward CAUTION"""
         
         self.prompt = PromptTemplate(
             template=self.safety_prompt_template,
             input_variables=["context", "question"]
         )
+    
+    def _lookup_from_all_sources(self, ingredient: str) -> Optional[Dict]:
+        """Look up chemical data from all available sources (PubChem, FDA, EWG, IARC).
+        
+        Queries in order: PubChem (live) → FDA GRAS → EWG → IARC
+        Combines results from all matching sources.
+        
+        Args:
+            ingredient: Ingredient/chemical name
+            
+        Returns:
+            Combined chemical data dictionary or None if not found in any source
+        """
+        sources_data = []
+        combined_data = {
+            "name": ingredient,
+            "safety_ratings": {},  # Track ratings from different sources
+            "hazards": set(),
+            "sources": set(),
+            "data_source": "multi-source"
+        }
+        
+        print(f"\n[Multi-Source Lookup] Starting search for '{ingredient}'...")
+        
+        # 1. Query PubChem live API first
+        print(f"[Multi-Source] 1. Querying PubChem live API...")
+        try:
+            pubchem_data = self._fetch_live_pubchem_data(ingredient)
+            if pubchem_data:
+                sources_data.append(pubchem_data)
+                combined_data["safety_ratings"]["PubChem"] = pubchem_data.get('safety_rating', 'UNKNOWN')
+                combined_data["sources"].add("PubChem (live API)")
+                if pubchem_data.get('hazards'):
+                    combined_data["hazards"].update(pubchem_data['hazards'].split('; '))
+                print(f"[Multi-Source] ✓ Found in PubChem: {pubchem_data.get('name')}")
+            else:
+                print(f"[Multi-Source] ✗ Not found in PubChem")
+        except Exception as e:
+            print(f"[Multi-Source] ✗ PubChem query failed: {e}")
+        
+        # 2. Look up in FDA GRAS list
+        print(f"[Multi-Source] 2. Searching FDA GRAS list...")
+        try:
+            fda_chemicals = self.fda_loader.load_gras_list()
+            print(f"[Multi-Source] Loaded {len(fda_chemicals)} chemicals from FDA")
+            fda_match = self._find_chemical_match(ingredient, fda_chemicals)
+            if fda_match:
+                sources_data.append(fda_match)
+                combined_data["safety_ratings"]["FDA_GRAS"] = fda_match.get('safety_rating', 'UNKNOWN')
+                combined_data["sources"].add("FDA GRAS List")
+                if fda_match.get('hazards'):
+                    combined_data["hazards"].add(fda_match['hazards'])
+                print(f"[Multi-Source] ✓ Found in FDA GRAS: {fda_match.get('name')}")
+            else:
+                print(f"[Multi-Source] ✗ Not found in FDA GRAS")
+        except Exception as e:
+            print(f"[Multi-Source] ✗ FDA query failed: {e}")
+        
+        # 3. Look up in EWG Skin Deep
+        print(f"[Multi-Source] 3. Searching EWG Skin Deep...")
+        try:
+            ewg_chemicals = self.ewg_loader.load_cosmetic_ingredients()
+            print(f"[Multi-Source] Loaded {len(ewg_chemicals)} chemicals from EWG")
+            ewg_match = self._find_chemical_match(ingredient, ewg_chemicals)
+            if ewg_match:
+                sources_data.append(ewg_match)
+                combined_data["safety_ratings"]["EWG"] = ewg_match.get('safety_rating', 'UNKNOWN')
+                combined_data["sources"].add("EWG Skin Deep")
+                if ewg_match.get('hazards'):
+                    combined_data["hazards"].add(ewg_match['hazards'])
+                print(f"[Multi-Source] ✓ Found in EWG: {ewg_match.get('name')}")
+            else:
+                print(f"[Multi-Source] ✗ Not found in EWG")
+        except Exception as e:
+            print(f"[Multi-Source] ✗ EWG query failed: {e}")
+        
+        # 4. Look up in IARC carcinogen list
+        print(f"[Multi-Source] 4. Searching IARC carcinogen list...")
+        try:
+            iarc_chemicals = self.iarc_loader.load_iarc_carcinogens()
+            print(f"[Multi-Source] Loaded {len(iarc_chemicals)} chemicals from IARC")
+            iarc_match = self._find_chemical_match(ingredient, iarc_chemicals)
+            if iarc_match:
+                sources_data.append(iarc_match)
+                combined_data["safety_ratings"]["IARC"] = iarc_match.get('safety_rating', 'UNKNOWN')
+                combined_data["sources"].add("IARC Carcinogen List")
+                if iarc_match.get('hazards'):
+                    combined_data["hazards"].add(iarc_match['hazards'])
+                print(f"[Multi-Source] ✓ Found in IARC: {iarc_match.get('name')}")
+            else:
+                print(f"[Multi-Source] ✗ Not found in IARC")
+        except Exception as e:
+            print(f"[Multi-Source] ✗ IARC query failed: {e}")
+        
+        # If no sources found, return None
+        if not sources_data:
+            print(f"[Multi-Source] ✗ No data found in ANY source for '{ingredient}'")
+            return None
+        
+        # Combine data from all sources
+        combined_data["hazards"] = "; ".join(sorted(combined_data["hazards"]))
+        combined_data["sources"] = ", ".join(sorted(combined_data["sources"]))
+        
+        # Determine overall safety rating based on authority hierarchy
+        if "IARC" in combined_data["safety_ratings"]:
+            combined_data["safety_rating"] = combined_data["safety_ratings"]["IARC"]  # IARC most authoritative for carcinogens
+        elif "EWG" in combined_data["safety_ratings"]:
+            combined_data["safety_rating"] = combined_data["safety_ratings"]["EWG"]
+        elif "PubChem" in combined_data["safety_ratings"]:
+            combined_data["safety_rating"] = combined_data["safety_ratings"]["PubChem"]
+        elif "FDA_GRAS" in combined_data["safety_ratings"]:
+            combined_data["safety_rating"] = combined_data["safety_ratings"]["FDA_GRAS"]
+        else:
+            combined_data["safety_rating"] = "UNKNOWN"
+        
+        combined_data["document"] = f"Multi-source data: {combined_data['sources']}"
+        combined_data["similarity_score"] = 0.95
+        
+        print(f"[Multi-Source] ✓ Completed search for '{ingredient}': Rating={combined_data['safety_rating']}, Sources={len(sources_data)}, All Sources: {combined_data['sources']}")
+        return combined_data
+    
+    def _find_chemical_match(self, ingredient: str, chemical_list: List[Dict]) -> Optional[Dict]:
+        """Find a matching chemical in a list by name (case-insensitive fuzzy match).
+        
+        Args:
+            ingredient: Chemical name to search for
+            chemical_list: List of chemical dictionaries
+            
+        Returns:
+            Matching chemical dictionary or None
+        """
+        ingredient_lower = ingredient.lower().strip()
+        for chem in chemical_list:
+            chem_name = chem.get('name', '').lower()
+            # Exact match or partial match
+            if chem_name == ingredient_lower or ingredient_lower in chem_name or chem_name in ingredient_lower:
+                return chem
+        return None
     
     def retrieve_context(self, ingredient: str, top_k: int = 5) -> List[Dict]:
         """Retrieve relevant chemical safety information.
@@ -109,8 +257,34 @@ Record {i}:
         Returns:
             Dictionary with analysis results and citations
         """
-        # Retrieve relevant context from knowledge base
-        retrieved_docs = self.retrieve_context(ingredient, top_k=top_k)
+        # Priority 1: Try multi-source lookup (PubChem + FDA + EWG + IARC)
+        logger.info(f"Analyzing ingredient: {ingredient}")
+        multi_source_data = self._lookup_from_all_sources(ingredient)
+        
+        if multi_source_data:
+            # Use multi-source data
+            retrieved_docs = [multi_source_data]
+            data_source = "live_databases"
+            logger.info(f"Using multi-source data for '{ingredient}'")
+        else:
+            # Fallback to static KB
+            logger.info(f"No multi-source data found, falling back to knowledge base...")
+            retrieved_docs = self.retrieve_context(ingredient, top_k=top_k)
+            data_source = "knowledge_base"
+            
+            if not retrieved_docs:
+                # If KB also empty, return UNKNOWN
+                logger.warning(f"No data found for '{ingredient}' in any source")
+                return {
+                    "ingredient_name": ingredient,
+                    "safety_rating": "UNKNOWN",
+                    "reasoning": "No information found in any source (PubChem, FDA, EWG, IARC, or local knowledge base). Please research further or consult product documentation.",
+                    "hazards": [],
+                    "sources": [],
+                    "confidence_score": 0.0,
+                    "data_source": "none"
+                }
+        
         context = self.format_context(retrieved_docs)
         
         # Prepare the full prompt
@@ -133,6 +307,7 @@ Record {i}:
                 # Fallback for when LLM is not initialized
                 response_text = self._generate_response_with_fallback(ingredient, retrieved_docs)
         except Exception as e:
+            logger.error(f"LLM analysis error: {e}")
             response_text = self._generate_response_with_fallback(ingredient, retrieved_docs)
         
         # Parse the response
@@ -152,14 +327,100 @@ Record {i}:
                 
                 analysis = json.loads(response_str.strip())
         except (json.JSONDecodeError, AttributeError, TypeError) as e:
+            logger.error(f"JSON parsing error: {e}")
             # Fallback if JSON parsing fails
             analysis = self._generate_response_with_fallback(ingredient, retrieved_docs)
         
         # Add retrieved docs as evidence
         analysis['evidence'] = retrieved_docs
         analysis['retrieval_used'] = len(retrieved_docs) > 0
+        analysis['data_source'] = data_source
         
         return analysis
+    
+    def _fetch_live_pubchem_data(self, ingredient: str) -> Optional[Dict]:
+        """Fetch live chemical data from PubChem API.
+        
+        Args:
+            ingredient: Ingredient name to search for
+            
+        Returns:
+            Dictionary with PubChem data or None if not found
+        """
+        try:
+            # Search PubChem for the compound
+            search_url = "https://pubchem.ncbi.nlm.nih.gov/rest/v1/compound/name"
+            params = {"name": ingredient, "match": "contains"}
+            
+            search_response = requests.get(f"{search_url}/{ingredient}/json", timeout=5)
+            if search_response.status_code != 200:
+                logger.warning(f"PubChem search failed for '{ingredient}': status {search_response.status_code}")
+                return None
+            
+            search_data = search_response.json()
+            if "compound" not in search_data or not search_data["compound"]:
+                logger.info(f"No PubChem results found for '{ingredient}'")
+                return None
+            
+            # Get the first matching compound
+            compound = search_data["compound"][0]
+            cid = compound.get("id")
+            compound_name = compound.get("name", ingredient)
+            
+            # Fetch detailed compound information
+            detail_url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/CID/{cid}/property/IUPACName,MolecularFormula,ExactMass,HazardSummary/JSON"
+            detail_response = requests.get(detail_url, timeout=5)
+            
+            hazards = []
+            if detail_response.status_code == 200:
+                detail_data = detail_response.json()
+                if "properties" in detail_data and detail_data["properties"]:
+                    prop = detail_data["properties"][0]
+                    if "HazardSummary" in prop:
+                        # Extract hazard categories
+                        hazard_summary = prop.get("HazardSummary", "")
+                        if hazard_summary:
+                            # Simple extraction of hazard categories
+                            if "Health Hazard" in hazard_summary:
+                                hazards.append("Health Hazard")
+                            if "Skin Irritant" in hazard_summary:
+                                hazards.append("Skin Irritant")
+                            if "Eye Irritant" in hazard_summary:
+                                hazards.append("Eye Irritant")
+                            if "Acute Toxicity" in hazard_summary:
+                                hazards.append("Acute Toxicity")
+            
+            # Assume moderate safety unless severe hazards found
+            safety_rating = "SAFE"
+            if any(h in ["Acute Toxicity"] for h in hazards):
+                safety_rating = "HARMFUL"
+            elif hazards:
+                safety_rating = "CAUTION"
+            
+            # Format as KB document
+            pubchem_doc = {
+                "name": compound_name,
+                "cas_number": compound.get("cas", "N/A"),
+                "safety_rating": safety_rating,
+                "hazards": "; ".join(hazards) if hazards else "No significant hazards identified",
+                "sources": f"PubChem (CID: {cid})",
+                "similarity_score": 0.95,
+                "document": f"Live data from PubChem for {compound_name}. CID: {cid}. This ingredient was not found in the local knowledge base but was retrieved from PubChem API.",
+                "pubchem_url": f"https://pubchem.ncbi.nlm.nih.gov/compound/{cid}"
+            }
+            
+            logger.info(f"Successfully fetched PubChem data for '{ingredient}': {compound_name}")
+            return pubchem_doc
+            
+        except requests.exceptions.Timeout:
+            logger.warning(f"PubChem API timeout for '{ingredient}'")
+            return None
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"PubChem API error for '{ingredient}': {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Unexpected error fetching PubChem data for '{ingredient}': {e}")
+            return None
     
     def _generate_response_with_fallback(self, ingredient: str, retrieved_docs: List[Dict]) -> Dict:
         """Generate response when LLM is unavailable.

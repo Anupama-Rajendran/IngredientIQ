@@ -169,14 +169,14 @@ class HybridProductLookup:
         print(f"\n[HybridLookup] Starting for: '{product_name}'")
         start_time = time.time()
         
-        # Step 1: Check Cache (< 1ms)
-        print(f"[Step 1] Checking cache...")
-        if self.tools and hasattr(self.tools, 'ProductCache'):
-            cache = self.tools.ProductCache()
-            cached = cache.get(product_name)
-            if cached:
-                print(f"[Cache] ✓ HIT in {time.time() - start_time:.3f}s")
-                return cached
+        # Step 1: Check Cache (DISABLED - bypass cache to fetch fresh data)
+        # print(f"[Step 1] Checking cache...")
+        # if self.tools and hasattr(self.tools, 'ProductCache'):
+        #     cache = self.tools.ProductCache()
+        #     cached = cache.get(product_name)
+        #     if cached:
+        #         print(f"[Cache] ✓ HIT in {time.time() - start_time:.3f}s")
+        #         return cached
         
         # Step 2: Check Preseeded Database + Fuzzy Match (instant)
         print(f"[Step 2] Checking preseeded database...")
