@@ -560,42 +560,6 @@ print(f'Seeded {kb.count_chemicals()} chemicals')
 
 ---
 
-## 🤝 Contributing
-
-Areas for improvement:
-
-- [ ] Integrate more chemical databases
-- [ ] Add user accounts and watchlists
-- [ ] Create mobile app (React Native)
-- [ ] Build browser extension
-- [ ] Generate PDF reports
-- [ ] Implement multilingual support
-
----
-
-## 📋 Next Steps
-
-### Day 1
-
-- [ ] Set up environment
-- [ ] Run quick start
-- [ ] Test APIs
-- [ ] Upload sample images
-
-### Week 1
-
-- [ ] Expand knowledge base
-- [ ] Deploy to cloud
-- [ ] Add authentication
-
-### Month 1
-
-- [ ] Mobile app
-- [ ] Browser extension
-- [ ] Advanced features
-
----
-
 ## 📜 License
 
 MIT License - See LICENSE for details
