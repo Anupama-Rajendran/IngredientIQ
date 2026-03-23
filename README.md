@@ -260,7 +260,49 @@ Response: Single ingredient analysis with evidence
 
 ---
 
-## 📁 Project Structure
+## � Evaluation & RAGAS Metrics
+
+LabelLens includes a comprehensive RAGAS evaluation pipeline to measure RAG quality with metrics like Faithfulness and Answer Relevancy.
+
+### Running Evaluations
+
+```bash
+# Quick evaluation (5 ingredients, ~1 min)
+python evals/run_evaluation.py --test-set ingredient --eval-llm gpt-3.5-turbo
+
+# Full workflow with KB reset (~2 min)
+python full_eval_run.py
+```
+
+### Current Performance (March 23, 2026)
+
+| Metric | Score | Status |
+|--------|-------|--------|
+| **Faithfulness** | 0.867 | ✅ PASS (threshold: 0.8) |
+| **Answer Relevancy** | 0.680 | ⚠️ Close (threshold: 0.8) |
+| **Context Precision** | 1.000 | ✅ PERFECT (threshold: 0.7) |
+| **Context Recall** | 1.000 | ✅ PERFECT (threshold: 0.7) |
+
+**Key Insight:** Perfect retrieval metrics (1.0) indicate knowledge base quality is excellent. Answer Relevancy plateau suggests need for more detailed chemical information in KB rather than prompt engineering.
+
+### Evaluation Architecture
+
+```
+Production RAG (backend/rag_pipeline.py)
+├── Multi-source: PubChem API + FDA + EWG + IARC
+├── Live API calls enabled
+└── For real-time /api/v1/analyze-* endpoints
+
+Evaluation RAG (evals/rag_pipeline_eval.py)
+├── KB-only mode (no external APIs)
+├── Consistent, reproducible results
+├── For RAGAS metric testing
+└── Run via evals/run_evaluation.py
+```
+
+**See [RAG_IMPLEMENTATION_SUMMARY.md](./RAG_IMPLEMENTATION_SUMMARY.md) for detailed evaluation analysis.**
+
+---
 
 ```
 LabelLens/
@@ -297,6 +339,23 @@ LabelLens/
 │   ├── tailwind.config.ts  # Tailwind configuration
 │   ├── tsconfig.json       # TypeScript config
 │   └── next.config.js
+│
+├── evals/                 # RAGAS evaluation framework
+│   ├── run_evaluation.py    # Evaluation runner
+│   ├── ragas_evaluator.py   # RAGAS metrics
+│   ├── eval_dataset.py      # Test datasets
+│   ├── report_generator.py  # Result reports
+│   ├── check_regression.py  # Regression checks
+│   └── __init__.py
+│
+├── eval_results/          # Evaluation reports & metrics
+│   ├── baseline.json      # Baseline metrics
+│   ├── scores.jsonl       # Raw evaluation scores
+│   ├── SAMPLE_REPORT.md   # Sample evaluation report
+│   └── eval_report_*.md   # Timestamped evaluation reports
+│
+├── data/                  # Local data storage
+│   └── chroma/            # ChromaDB vector database
 │
 ├── SETUP.md               # Setup & installation guide
 ├── ARCHITECTURE.md        # Technical design & patterns

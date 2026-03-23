@@ -61,6 +61,29 @@
 3. Try searching for "Neutrogena" or uploading a product label image
 4. Check http://localhost:8000/docs for all available API endpoints
 
+### Running Evaluations (Optional)
+
+The project includes RAGAS evaluation for measuring RAG quality:
+
+```bash
+# Simple evaluation (5 ingredients, ~1 min)
+python evals/run_evaluation.py --test-set ingredient --eval-llm gpt-3.5-turbo
+
+# Full workflow: reset KB + run evals (~2 min)
+python full_eval_run.py
+
+# View results
+cat eval_results/eval_report_*.md
+```
+
+**Latest RAGAS Metrics:**
+- Faithfulness: 0.867 ✅ (threshold: 0.8)
+- Answer Relevancy: 0.680 (threshold: 0.8)
+- Context Precision: 1.000 ✅ (threshold: 0.7)
+- Context Recall: 1.000 ✅ (threshold: 0.7)
+
+See [RAG_IMPLEMENTATION_SUMMARY.md](./RAG_IMPLEMENTATION_SUMMARY.md) for detailed analysis.
+
 ---
 
 ## Architecture Overview

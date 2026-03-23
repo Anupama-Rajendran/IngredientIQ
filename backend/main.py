@@ -611,7 +611,21 @@ For "{product_name}", identify the product type and generate realistic typical i
         
         response_text = message.content[0].text.strip()
         
+        # Debug: Log raw response if empty
+        if not response_text:
+            print(f"[LLM Extract] ⚠️  Empty response from LLM")
+            return None
+        
         try:
+            # Handle markdown-wrapped JSON (remove ```json and ``` if present)
+            if response_text.startswith("```"):
+                # Find the opening and closing backticks
+                start_idx = response_text.find("{")
+                end_idx = response_text.rfind("}") + 1
+                if start_idx >= 0 and end_idx > start_idx:
+                    response_text = response_text[start_idx:end_idx]
+                    print(f"[LLM Extract] Extracted JSON from markdown wrapping")
+            
             # Parse JSON response
             parsed = json.loads(response_text)
             ingredients = parsed.get("likely_ingredients", [])
@@ -635,6 +649,7 @@ For "{product_name}", identify the product type and generate realistic typical i
         
         except (json.JSONDecodeError, KeyError) as e:
             print(f"[LLM Extract] ✗ Failed to parse response: {e}")
+            print(f"[LLM Extract] Raw response: {response_text[:200]}...")
             return None
     
     except Exception as e:
