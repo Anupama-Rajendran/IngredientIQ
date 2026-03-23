@@ -21,8 +21,14 @@ class IngredientSafetyRAG:
         self.llm = llm
         
         self.safety_prompt_template = """You are a chemical safety expert analyzing ingredients in consumer products.
+Your task is to classify the ingredient's safety based ONLY on the provided chemical safety database.
 
-Based on the chemical safety database information provided below, classify the ingredient and provide reasoning.
+CRITICAL INSTRUCTIONS:
+- Do NOT use any general knowledge about chemicals
+- Do NOT infer or assume safety levels
+- If the ingredient is not in the database, respond with UNKNOWN
+- Only cite information explicitly present in the database
+- Be conservative: when uncertain, rate CAUTION or HARMFUL
 
 CHEMICAL SAFETY DATABASE:
 {context}
@@ -31,21 +37,22 @@ INGREDIENT TO ANALYZE: {question}
 
 Provide your response in the following JSON format:
 {{
-    "ingredient_name": "string - normalized ingredient name",
+    "ingredient_name": "string - exact normalized ingredient name from database or question",
     "safety_rating": "SAFE|CAUTION|HARMFUL|UNKNOWN",
-    "reasoning": "string - detailed explanation of the classification",
-    "hazards": ["list of identified hazards"],
-    "sources": ["list of evidence sources"],
+    "reasoning": "string - detailed explanation citing ONLY database sources",
+    "hazards": ["list of hazards explicitly mentioned in database"],
+    "sources": ["list of exact source citations from database"],
     "confidence_score": 0.0-1.0
 }}
 
-Rules:
-1. Only return valid JSON, no additional text
-2. Base your classification on the database information provided
-3. If database shows conflicting information, weight by source authority
-4. If no relevant information found, return UNKNOWN
-5. Always cite the sources used in classification
-6. Be conservative - when in doubt, err toward CAUTION"""
+VALIDATION RULES:
+1. Only return valid JSON, no markdown or additional text
+2. Every claim must be traceable to database content
+3. If database is silent on safety, say UNKNOWN
+4. List only hazards explicitly mentioned in retrieved data
+5. Cite exact source names/references from database
+6. confidence_score reflects how well database answers the question (not general knowledge)
+7. When in doubt between ratings, choose the more conservative (e.g., CAUTION over SAFE)"""
         
         self.prompt = PromptTemplate(
             template=self.safety_prompt_template,

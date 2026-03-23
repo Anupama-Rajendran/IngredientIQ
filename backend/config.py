@@ -1,6 +1,7 @@
 """Configuration management for IngredientIQ backend."""
 import os
 from pydantic_settings import BaseSettings
+from pydantic import ConfigDict
 from typing import Optional
 from pathlib import Path
 
@@ -8,13 +9,21 @@ from pathlib import Path
 class Settings(BaseSettings):
     """Application settings."""
     
+    model_config = ConfigDict(
+        extra='ignore',  # Ignore extra environment variables
+        env_file=str(Path(__file__).parent / ".env"),
+        case_sensitive=True
+    )
+    
     # API Keys
     ANTHROPIC_API_KEY: Optional[str] = None
     OPENAI_API_KEY: Optional[str] = None
+    GOOGLE_API_KEY: Optional[str] = None
     
     # LLM Config
     LLM_PROVIDER: str = "anthropic"  # anthropic, openai
-    LLM_MODEL: str = "claude-3-sonnet-20240229"
+    LLM_MODEL: str = "claude-haiku-4-5-20251001"  # Production LLM for answer generation
+    LM_MODEL: Optional[str] = None  # Alias for LLM_MODEL from env
     EMBEDDING_MODEL: str = "text-embedding-3-small"
     
     # RAG Config
@@ -34,16 +43,12 @@ class Settings(BaseSettings):
     # Backend Config
     DEBUG: bool = False
     BACKEND_PORT: int = 8000
-    
-    class Config:
-        env_file = str(Path(__file__).parent / ".env")
-        case_sensitive = True
 
 
 settings = Settings()
 
 # Debug: Log API key status on startup
 if settings.ANTHROPIC_API_KEY:
-    print("✅ ANTHROPIC_API_KEY is configured")
+    print("[OK] ANTHROPIC_API_KEY is configured")
 else:
-    print("⚠️  WARNING: ANTHROPIC_API_KEY not found in .env file")
+    print("[WARN] WARNING: ANTHROPIC_API_KEY not found in .env file")

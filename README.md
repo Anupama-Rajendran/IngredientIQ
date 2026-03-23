@@ -287,22 +287,25 @@ LabelLens/
 │   │   ├── ImageUpload.tsx
 │   │   ├── ProductAnalysisResults.tsx
 │   │   ├── IngredientCard.tsx
-│   │   └── SafetyBadge.tsx
+│   │   ├── SafetyBadge.tsx
+│   │   └── IngredientAnalyzer.tsx
 │   ├── lib/
 │   │   └── api.ts          # API client
-│   └── package.json
+│   ├── public/             # Static assets
+│   │   └── IngredientIQ_logo.svg
+│   ├── package.json
+│   ├── tailwind.config.ts  # Tailwind configuration
+│   ├── tsconfig.json       # TypeScript config
+│   └── next.config.js
 │
-├── Documentation/
-│   ├── SETUP.md                    # Setup guide
-│   ├── ARCHITECTURE.md             # Technical design
-│   ├── APPLICATION_DOCUMENTATION.md
-│   ├── product-spec.md             # Original spec
-│   └── test_api.py                 # API tests
-│
-└── Configuration/
-    ├── .gitignore
-    ├── start.sh            # Startup script
-    └── README.md           # This file
+├── SETUP.md               # Setup & installation guide
+├── ARCHITECTURE.md        # Technical design & patterns
+├── APPLICATION_DOCUMENTATION.md  # Feature guide & API reference
+├── product-spec.md        # Original product specification
+├── test_api.py            # API integration tests
+├── start.sh               # Startup script
+├── .gitignore
+└── README.md              # This file
 ```
 
 ---
@@ -342,7 +345,79 @@ curl -X POST http://localhost:8000/api/v1/analyze-ingredients \
 
 ---
 
-## 🔐 Security & Privacy
+## � RAGAS Evaluation
+
+IngredientIQ uses **RAGAS (Retrieval-Augmented Generation Assessment)** for comprehensive RAG pipeline evaluation with a separate LLM for unbiased evaluation.
+
+### Evaluation Metrics
+
+| Metric                | Threshold | Purpose                                                                      |
+| --------------------- | --------- | ---------------------------------------------------------------------------- |
+| **Faithfulness**      | ≥ 0.8     | Answers are factually consistent with retrieved contexts (no hallucinations) |
+| **Answer Relevancy**  | ≥ 0.8     | Generated answers directly address the input question                        |
+| **Context Precision** | ≥ 0.7     | Retrieved contexts are relevant to the query                                 |
+| **Context Recall**    | ≥ 0.7     | All relevant contexts are successfully retrieved                             |
+
+### Running Evaluations
+
+```bash
+# Run combined evaluation (ingredients + products)
+python evals/run_evaluation.py
+
+# Run specific test set
+python evals/run_evaluation.py --test-set ingredient
+python evals/run_evaluation.py --test-set product
+
+# Use different LLM for evaluation (separate from production)
+python evals/run_evaluation.py --eval-llm gpt-3.5-turbo
+
+# Compare historical results
+python evals/run_evaluation.py --compare
+```
+
+### Evaluation Reports
+
+Each evaluation generates a comprehensive report including:
+
+1. **Executive Summary** - Overall pass/fail status and key findings
+2. **RAGAS Metric Scores** - Detailed metric breakdown with thresholds
+3. **Input Breakdown** - Ingredient and product test categorization
+4. **RAG vs Baseline Comparison** - Performance trends over time
+5. **Failure Analysis** - Detailed investigation of any failed tests
+6. **Trends** - Historical performance tracking
+7. **Recommendations** - Specific improvements for failing metrics
+
+Reports are saved to `eval_results/eval_report_YYYYMMDD_HHMMSS.md`
+
+### Score Tracking
+
+All evaluation scores are automatically tracked in `eval_results/scores.jsonl`:
+
+```json
+{
+  "faithfulness": 0.85,
+  "answer_relevancy": 0.82,
+  "context_precision": 0.75,
+  "context_recall": 0.76,
+  "timestamp": "2024-03-20T10:30:45.123456",
+  "test_size": 10,
+  "eval_llm": "gpt-3.5-turbo"
+}
+```
+
+### When to Re-evaluate
+
+Run evaluations when:
+
+- ✓ Prompt templates are modified
+- ✓ Knowledge base content is updated
+- ✓ Retrieval settings change (chunk size, similarity threshold)
+- ✓ New features are implemented
+- ✓ Monthly monitoring (scheduled)
+
+---
+
+## �🔐 Security & Privacy
 
 - ✅ No user data stored
 - ✅ API keys stored in environment only (not in code)
@@ -358,6 +433,7 @@ curl -X POST http://localhost:8000/api/v1/analyze-ingredients \
 | -------------------------------------------------------------- | ------------------------------ | ---------------- |
 | [SETUP.md](./SETUP.md)                                         | Installation guide             | Developers       |
 | [ARCHITECTURE.md](./ARCHITECTURE.md)                           | Technical design               | Architects       |
+| [EVALUATION.md](./EVALUATION.md)                               | RAGAS evaluation guide         | QA & Evaluation  |
 | [APPLICATION_DOCUMENTATION.md](./APPLICATION_DOCUMENTATION.md) | Feature guide & API reference  | Users            |
 | [product-spec.md](./product-spec.md)                           | Original product specification | Product managers |
 

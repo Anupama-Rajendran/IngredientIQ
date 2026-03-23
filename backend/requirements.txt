@@ -6,9 +6,23 @@ chromadb
 numpy<2.0
 langchain
 langchain-openai
+langchain-anthropic
 openai
 anthropic
 python-dotenv
 pydantic
 fuzzywuzzy
 python-Levenshtein
+
+# Evaluation and RAGAS
+ragas>=0.1.0
+datasets
+scikit-learn
+
+# Optional: Google Gemini support (uncomment to install)
+# langchain-google-genai
+# google-generativeai
+
+# Optional: Hugging Face support (uncomment to install)
+# langchain-huggingface
+# huggingface-hub

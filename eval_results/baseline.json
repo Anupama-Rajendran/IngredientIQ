@@ -1,0 +1,11 @@
+{
+  "faithfulness": 0.875,
+  "answer_relevancy": 0.68,
+  "context_precision": 1.0,
+  "context_recall": 1.0,
+  "timestamp": "2026-03-23T00:07:42.936916",
+  "test_size": 7,
+  "model_version": "claude-haiku-4-5-20251001",
+  "eval_llm": "gpt-3.5-turbo",
+  "notes": "GPT-3.5-turbo baseline after prompt refinement: 3/4 metrics passing. Improved Faithfulness from 0.778→0.875 by (1) removing broken product tests, (2) adding ingredient-based product tests, (3) making prompt conservative with explicit hallucination prevention."
+}
