@@ -10,22 +10,25 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 sys.path.insert(0, str(Path(__file__).parent.parent / "backend"))
 
+from rag.knowledge_base import ChemicalKnowledgeBase
+from config import settings
+from llm.llm_factory import LLMFactory
+from rag_pipeline_eval import IngredientSafetyRAGEval
+
 try:
-    from rag.knowledge_base import ChemicalKnowledgeBase
-    from rag.rag_pipeline import IngredientSafetyRAG
-    from config import settings
-    from llm.llm_factory import LLMFactory
-except ImportError as e:
-    logger.warning(f"Could not import RAG: {e}")
+    ChemicalKnowledgeBase
+    settings
+    LLMFactory
+except NameError as e:
+    logger.warning(f"Could not import dependencies: {e}")
     ChemicalKnowledgeBase = None
-    IngredientSafetyRAG = None
     settings = None
     LLMFactory = None
 
 
-def _get_rag_pipeline() -> Optional[IngredientSafetyRAG]:
-    """Initialize RAG pipeline if components available."""
-    if not all([ChemicalKnowledgeBase, LLMFactory, settings]):
+def _get_rag_pipeline():
+    """Initialize EvaluationRAG pipeline if components available."""
+    if not all([ChemicalKnowledgeBase, settings, LLMFactory]):
         logger.error("Missing required components for RAG pipeline")
         return None
     try:
@@ -38,16 +41,20 @@ def _get_rag_pipeline() -> Optional[IngredientSafetyRAG]:
         llm = LLMFactory.create_llm()
         logger.debug(f"LLM created: {type(llm).__name__}")
         
-        logger.debug("Creating RAG pipeline")
-        rag = IngredientSafetyRAG(kb, llm=llm)
-        logger.debug("RAG pipeline initialized successfully")
+        logger.debug("Creating IngredientSafetyRAGEval pipeline (KB-only mode)")
+        # Use IngredientSafetyRAGEval with KB-only mode for consistent evaluation
+        rag = IngredientSafetyRAGEval(
+            kb,
+            llm=llm
+        )
+        logger.debug("IngredientSafetyRAGEval pipeline initialized successfully")
         return rag
     except Exception as e:
         logger.error(f"RAG init failed: {e}", exc_info=True)
         return None
 
 
-def _generate_rag_answer(rag: Optional[IngredientSafetyRAG], question: str) -> Dict[str, Any]:
+def _generate_rag_answer(rag: Optional[Any], question: str) -> Dict[str, Any]:
     """Generate answer and retrieve contexts via RAG pipeline."""
     if not rag:
         logger.warning(f"RAG pipeline is None - cannot retrieve contexts")

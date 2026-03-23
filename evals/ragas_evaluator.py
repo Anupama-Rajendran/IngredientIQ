@@ -21,45 +21,97 @@ from pathlib import Path
 from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent.parent / "backend" / ".env")
 
-try:
-    from ragas import evaluate
-    from ragas.metrics import (
-        faithfulness,
-        answer_relevancy,
-        context_precision,
-        context_recall,
-    )
-except ImportError as e:
-    raise ImportError(
-        "RAGAS not installed. Install with: pip install ragas datasets scikit-learn"
-    ) from e
+# Lazy import of RAGAS - will be imported when needed
+evaluate = None
+faithfulness = None
+answer_relevancy = None
+context_precision = None
+context_recall = None
 
-try:
-    from langchain_openai import ChatOpenAI
-    from langchain_openai import OpenAIEmbeddings
-except ImportError:
-    # Fallback for older langchain versions
-    from langchain.chat_models import ChatOpenAI
-    from langchain.embeddings import OpenAIEmbeddings
+def _ensure_ragas_loaded():
+    """Lazy load RAGAS components when needed"""
+    global evaluate, faithfulness, answer_relevancy, context_precision, context_recall
+    if evaluate is None:
+        try:
+            from ragas import evaluate as ragas_evaluate
+            from ragas.metrics import (
+                faithfulness as ragas_faithfulness,
+                answer_relevancy as ragas_answer_relevancy,
+                context_precision as ragas_context_precision,
+                context_recall as ragas_context_recall,
+            )
+            evaluate = ragas_evaluate
+            faithfulness = ragas_faithfulness
+            answer_relevancy = ragas_answer_relevancy
+            context_precision = ragas_context_precision
+            context_recall = ragas_context_recall
+        except ImportError as e:
+            raise ImportError(
+                "RAGAS not installed. Install with: pip install ragas datasets scikit-learn"
+            ) from e
 
-try:
-    from langchain_anthropic import ChatAnthropic
-except ImportError:
-    # Fallback for older langchain versions
-    from langchain.chat_models import ChatAnthropic
+# Lazy-load LangChain imports
+ChatOpenAI = None
+OpenAIEmbeddings = None
+ChatAnthropic = None
+ChatGoogleGenerativeAI = None
+ChatHuggingFace = None
+HuggingFaceEndpoint = None
 
-try:
-    from langchain_google_genai import ChatGoogleGenerativeAI
-except ImportError:
-    ChatGoogleGenerativeAI = None
+def _ensure_langchain_loaded():
+    """Lazy load LangChain components when needed"""
+    global ChatOpenAI, OpenAIEmbeddings, ChatAnthropic, ChatGoogleGenerativeAI, ChatHuggingFace, HuggingFaceEndpoint
+    if ChatOpenAI is None:
+        try:
+            from langchain_openai import ChatOpenAI as LC_ChatOpenAI
+            from langchain_openai import OpenAIEmbeddings as LC_OpenAIEmbeddings
+            ChatOpenAI = LC_ChatOpenAI
+            OpenAIEmbeddings = LC_OpenAIEmbeddings
+        except ImportError:
+            # Fallback for older langchain versions
+            from langchain.chat_models import ChatOpenAI as LC_ChatOpenAI
+            from langchain.embeddings import OpenAIEmbeddings as LC_OpenAIEmbeddings
+            ChatOpenAI = LC_ChatOpenAI
+            OpenAIEmbeddings = LC_OpenAIEmbeddings
+    
+    if ChatAnthropic is None:
+        try:
+            from langchain_anthropic import ChatAnthropic as LC_ChatAnthropic
+            ChatAnthropic = LC_ChatAnthropic
+        except ImportError:
+            from langchain.chat_models import ChatAnthropic as LC_ChatAnthropic
+            ChatAnthropic = LC_ChatAnthropic
+    
+    if ChatGoogleGenerativeAI is None:
+        try:
+            from langchain_google_genai import ChatGoogleGenerativeAI as LC_ChatGoogleGenerativeAI
+            ChatGoogleGenerativeAI = LC_ChatGoogleGenerativeAI
+        except ImportError:
+            ChatGoogleGenerativeAI = None
+    
+    if ChatHuggingFace is None:
+        try:
+            from langchain_huggingface import ChatHuggingFace as LC_ChatHuggingFace, HuggingFaceEndpoint as LC_HuggingFaceEndpoint
+            ChatHuggingFace = LC_ChatHuggingFace
+            HuggingFaceEndpoint = LC_HuggingFaceEndpoint
+        except ImportError:
+            ChatHuggingFace = None
+            HuggingFaceEndpoint = None
 
-try:
-    from langchain_huggingface import ChatHuggingFace, HuggingFaceEndpoint
-except ImportError:
-    ChatHuggingFace = None
-    HuggingFaceEndpoint = None
+# Lazy-load datasets.Dataset
+Dataset = None
 
-from datasets import Dataset
+def _ensure_datasets_loaded():
+    """Lazy load datasets.Dataset when needed"""
+    global Dataset
+    if Dataset is None:
+        try:
+            from datasets import Dataset as DS_Dataset
+            Dataset = DS_Dataset
+        except ImportError as e:
+            raise ImportError(
+                "datasets not installed. Install with: pip install datasets"
+            ) from e
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -121,6 +173,9 @@ class RAGASEvaluator:
             embedding_model: Embedding model for evaluation
             rate_limit_delay: Delay in seconds between API calls (default: 1.0)
         """
+        # Ensure LangChain is loaded
+        _ensure_langchain_loaded()
+        
         self.eval_llm = eval_llm
         self.embedding_model = embedding_model
         self.rate_limit_delay = rate_limit_delay
@@ -226,6 +281,12 @@ class RAGASEvaluator:
         Returns:
             RAGASScore object with evaluated metrics
         """
+        # Ensure RAGAS is loaded
+        _ensure_ragas_loaded()
+        
+        # Ensure datasets is loaded
+        _ensure_datasets_loaded()
+        
         logger.info(f"Evaluating {len(test_data)} test cases with {self.eval_llm}...")
         logger.info("Note: First evaluation may take 1-3 minutes due to API calls")
         
