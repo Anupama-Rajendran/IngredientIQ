@@ -340,55 +340,61 @@ Record {i}:
     
     def _fetch_live_pubchem_data(self, ingredient: str) -> Optional[Dict]:
         """Fetch live chemical data from PubChem API.
-        
+
         Args:
             ingredient: Ingredient name to search for
-            
+
         Returns:
             Dictionary with PubChem data or None if not found
         """
         try:
-            # Search PubChem for the compound
-            search_url = "https://pubchem.ncbi.nlm.nih.gov/rest/v1/compound/name"
-            params = {"name": ingredient, "match": "contains"}
-            
-            search_response = requests.get(f"{search_url}/{ingredient}/json", timeout=5)
+            # Search PubChem for the compound using correct PUG REST URL
+            from config import settings as cfg
+            search_url = f"{cfg.PUBCHEM_API}/compound/name/{ingredient}/JSON"
+
+            search_response = requests.get(search_url, timeout=5)
             if search_response.status_code != 200:
                 logger.warning(f"PubChem search failed for '{ingredient}': status {search_response.status_code}")
                 return None
-            
+
             search_data = search_response.json()
-            if "compound" not in search_data or not search_data["compound"]:
+            # PubChem PUG REST returns 'PC_Compounds', not 'compound'
+            if "PC_Compounds" not in search_data or not search_data["PC_Compounds"]:
                 logger.info(f"No PubChem results found for '{ingredient}'")
                 return None
+
+            # Get the first matching compound — CID is nested at id.id.cid
+            compound = search_data["PC_Compounds"][0]
+            cid = compound.get("id", {}).get("id", {}).get("cid")
+
+            # Extract IUPAC name from props array
+            compound_name = ingredient
+            for prop in compound.get("props", []):
+                if prop.get("urn", {}).get("label") == "IUPAC Name" and prop.get("urn", {}).get("name") == "Preferred":
+                    compound_name = prop.get("value", {}).get("sval", ingredient)
+                    break
             
-            # Get the first matching compound
-            compound = search_data["compound"][0]
-            cid = compound.get("id")
-            compound_name = compound.get("name", ingredient)
-            
-            # Fetch detailed compound information
-            detail_url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/CID/{cid}/property/IUPACName,MolecularFormula,ExactMass,HazardSummary/JSON"
-            detail_response = requests.get(detail_url, timeout=5)
-            
+            # Fetch GHS hazard data from PubChem safety annotations
+            # HazardSummary is not a valid PUG property; use the safety/GHS annotations endpoint instead
             hazards = []
-            if detail_response.status_code == 200:
-                detail_data = detail_response.json()
-                if "properties" in detail_data and detail_data["properties"]:
-                    prop = detail_data["properties"][0]
-                    if "HazardSummary" in prop:
-                        # Extract hazard categories
-                        hazard_summary = prop.get("HazardSummary", "")
-                        if hazard_summary:
-                            # Simple extraction of hazard categories
-                            if "Health Hazard" in hazard_summary:
-                                hazards.append("Health Hazard")
-                            if "Skin Irritant" in hazard_summary:
-                                hazards.append("Skin Irritant")
-                            if "Eye Irritant" in hazard_summary:
-                                hazards.append("Eye Irritant")
-                            if "Acute Toxicity" in hazard_summary:
-                                hazards.append("Acute Toxicity")
+            if cid:
+                ghs_url = f"{cfg.PUBCHEM_API}/compound/cid/{cid}/property/IUPACName,MolecularFormula/JSON"
+                ghs_annotations_url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug_view/data/compound/{cid}/JSON?heading=GHS+Classification"
+                try:
+                    ghs_response = requests.get(ghs_annotations_url, timeout=5)
+                    if ghs_response.status_code == 200:
+                        ghs_data = ghs_response.json()
+                        # Walk the PubChem annotations tree for GHS hazard statements
+                        sections = ghs_data.get("Record", {}).get("Section", [])
+                        for section in sections:
+                            for subsection in section.get("Section", []):
+                                for info in subsection.get("Information", []):
+                                    for val in info.get("Value", {}).get("StringWithMarkup", []):
+                                        text = val.get("String", "")
+                                        if text.startswith("H") and len(text) > 3:
+                                            hazards.append(text)
+                except Exception:
+                    pass  # GHS fetch is best-effort; carry on without it
             
             # Assume moderate safety unless severe hazards found
             safety_rating = "SAFE"
@@ -400,7 +406,7 @@ Record {i}:
             # Format as KB document
             pubchem_doc = {
                 "name": compound_name,
-                "cas_number": compound.get("cas", "N/A"),
+                "cas_number": "N/A",
                 "safety_rating": safety_rating,
                 "hazards": "; ".join(hazards) if hazards else "No significant hazards identified",
                 "sources": f"PubChem (CID: {cid})",
